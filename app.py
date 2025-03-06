@@ -2,16 +2,19 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-from app.database import db, save_chat_message, get_chat_history
+import json
+import matplotlib.pyplot as plt
+import seaborn as sns
+from app.database import db, save_chat_message, get_chat_history, clear_chat_history
 from app.auth import init_session_state, login_user, logout_user
 
-# ✅ Set page config at the start
+# ✅ Set page config
 st.set_page_config(page_title="💬 DataWhisper", layout="wide")
 
-# ✅ Initialize session state variables
-if 'page' not in st.session_state:
-    st.session_state.page = 'landing'
-if 'authenticated' not in st.session_state:
+# ✅ Initialize session state
+if "page" not in st.session_state:
+    st.session_state.page = "landing"
+if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 # ✅ API Configuration
@@ -30,179 +33,179 @@ init_session_state()
 if st.session_state.authenticated:
     if st.sidebar.button("🚪 Logout"):
         logout_user()
-        st.session_state.page = 'landing'
+        st.session_state.page = "landing"
         st.session_state.authenticated = False
-        st.rerun()  # ✅ Updated rerun method
+        st.rerun()
 else:
-    st.sidebar.warning("⚠️ Please login first.")
-
-# ✅ Page Routing
-if st.session_state.page == 'landing':
-    st.title("🤖 Welcome to DataWhisper")
+    st.title("📊 Welcome to DataWhisper - Your AI-Driven Data Assistant")
 
     st.markdown("""
-    <div style='text-align: center; padding: 2rem;'>
-        <h1 style='font-size: 3rem;'>Chat with Your Data Using AI</h1>
-        <p style='font-size: 1.2rem; margin: 1rem 0;'>
-            Transform your data analysis workflow with natural language queries. 
-            Upload your dataset and start asking questions instantly.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    ### 👋 What is DataWhisper?
+    DataWhisper is an AI-powered tool designed to help you analyze and visualize your dataset effortlessly.  
+    Simply upload a dataset, ask questions in natural language, and get instant insights!
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔐 Login", use_container_width=True):
-            st.session_state.page = 'login'
-            st.rerun()  # ✅ Updated rerun method
-    with col2:
-        if st.button("✨ Register", use_container_width=True):
-            st.session_state.page = 'register'
-            st.rerun()  # ✅ Updated rerun method
+    ### 🚀 How to Use DataWhisper:
+    1. **Login** to access the platform.
+    2. **Upload a CSV or Excel file** using the sidebar.
+    3. **Ask questions** about your dataset in the chat.
+    4. Get **instant results** with data tables and visualizations!
 
-elif st.session_state.page == 'login':
-    st.title("🔐 Login to DataWhisper")
-    
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    ### 💡 Example Queries:
+    - *"Show me the top 10 highest sales."*
+    - *"Plot a bar chart of sales by region."*
+    - *"Find the average price for each product category."*
 
-    if st.button("🔓 Login", use_container_width=True):
-        if login_user(username, password):
-            st.session_state.authenticated = True
-            st.session_state.page = 'chat'
-            st.rerun()  # ✅ Updated rerun method
-        else:
-            st.warning("⚠️ Invalid credentials. Please try again.")
+    🔐 **Please log in to get started.**
+    """)
 
-elif not st.session_state.authenticated:
-    st.warning("⚠️ Please login first.")
-    st.session_state.page = 'login'
-    st.rerun()
+    st.stop()
 
-# ✅ Main Chat Page (After Authentication)
-if st.session_state.authenticated:
-    st.title(f"💬 DataWhisper - Welcome, {st.session_state.user['username']}")
 
-    def load_data(file):
-        try:
-            if file.name.endswith(".csv"):
-                return pd.read_csv(file)
-            elif file.name.endswith((".xlsx", ".xls")):
-                return pd.read_excel(file)
-            else:
-                st.error("❌ Unsupported file type! Please upload a CSV or Excel file.")
-        except Exception as e:
-            st.error(f"🚫 Error loading file: {e}")
-        return None
+# ✅ Function to detect if query requires a chart
+def is_chart_request(query):
+    chart_keywords = ["bar chart", "plot", "graph", "visualize", "histogram", "scatter plot", "line chart"]
+    return any(keyword in query.lower() for keyword in chart_keywords)
 
-    def generate_code_from_query(query, columns):
+# ✅ Generate code from query
+def generate_code_from_query(query, columns):
+    if is_chart_request(query):
+        prompt = (
+            f"You are a Python data analyst. Given a dataset with columns: {columns}, "
+            f"generate a pandas and matplotlib/seaborn code snippet to visualize this query: \"{query}\". "
+            "Use 'df' as the DataFrame and return only the code without explanations. "
+            "Ensure the visualization is created correctly and does not contain syntax errors. "
+            "Assign the figure to a variable named 'fig'."
+        )
+    else:
         prompt = (
             f"You are a Python data analyst. Given a dataset with columns: {columns}, "
             f"generate a pandas code snippet to answer this query: \"{query}\". "
-            f"Use 'df' as the DataFrame and assign the result to a variable named 'result'. "
-            "Return only the code without explanations and without any markdown formatting."
+            "Use 'df' as the DataFrame and assign the result to a variable named 'result'. "
+            "Return only the code without explanations."
         )
 
-        payload = {
-            "model": "solar-1-mini-chat",
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant for Python data analysis."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 300
-        }
+    payload = {
+        "model": "solar-1-mini-chat",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant for Python data analysis."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 500
+    }
 
-        try:
-            response = requests.post(UPSTAGE_API_URL, headers=headers, json=payload)
-            response.raise_for_status()
-            raw_code = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+    try:
+        response = requests.post(UPSTAGE_API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        raw_code = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+        cleaned_code = re.sub(r"```(?:python)?\s*([\s\S]*?)\s*```", r"\1", raw_code).strip()
+        return cleaned_code
+    except Exception as e:
+        st.error(f"❌ Error generating code: {e}")
+        return ""
 
-            # ✅ Remove triple backticks and 'python' language specifier using regex
-            cleaned_code = re.sub(r"```(?:python)?\s*([\s\S]*?)\s*```", r"\1", raw_code).strip()
-            return cleaned_code
-        except Exception as e:
-            st.error(f"❌ Error generating code: {e}")
-            return ""
+# ✅ Execute generated code
+def execute_generated_code(code, df):
+    local_vars = {"df": df}
+    try:
+        exec(code, {}, local_vars)
+        if "fig" in local_vars and isinstance(local_vars["fig"], plt.Figure):
+            return "chart", local_vars["fig"]
+        return "data", local_vars.get("result", "⚠️ No 'result' variable found.")
+    except Exception as e:
+        st.error(f"🚫 Error executing code: {e}")
+        return None, None
 
-    def execute_generated_code(code, df):
-        local_vars = {"df": df}
-        try:
-            exec(code, {}, local_vars)
-            return local_vars.get("result", "⚠️ No 'result' variable found in the generated code.")
-        except Exception as e:
-            st.error(f"🚫 Error executing code: {e}")
-            return None
+# ✅ Main Chat Page
+if st.session_state.authenticated:
+    st.title(f"💬 DataWhisper - Welcome, {st.session_state.user['username']}")
 
-    # ✅ Sidebar for uploading files
     st.sidebar.header("📁 Upload Dataset")
     uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
 
     if uploaded_file:
-        df = load_data(uploaded_file)
+        file_id = uploaded_file.name  # Using file name as a unique identifier
+        st.session_state.current_file = file_id
 
-        if df is not None:
-            st.success("✅ Dataset loaded successfully!")
-            with st.expander("🔎 Preview Dataset"):
-                st.dataframe(df.head())
+        # Load dataset
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
+        st.success(f"✅ Dataset '{file_id}' loaded successfully!")
 
-            # ✅ Initialize chat history from MongoDB for the logged-in user
-            if "messages" not in st.session_state:
-                messages = get_chat_history(st.session_state.user['_id'])
-                st.session_state.messages = messages if messages else [
-                    {"role": "assistant", "content": "Hi! Upload your dataset and ask me anything about it."}
-                ]
-                
-                if not messages:
-                    save_chat_message(
-                        st.session_state.user['_id'],
-                        "assistant",
-                        "Hi! Upload your dataset and ask me anything about it."
-                    )
+        # ✅ Fetch chat history from database (restore both user + assistant messages)
+        st.session_state.messages = get_chat_history(st.session_state.user["email"])
 
-            # ✅ Display chat history
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-                    if msg.get("code"):
-                        st.markdown("💻 **Generated Code:**")
-                        st.code(msg["code"], language="python")
-                    if msg.get("result"):
-                        st.markdown("📊 **Query Result:**")
-                        try:
-                            result = eval(msg["result"])
-                            if isinstance(result, pd.DataFrame):
-                                st.dataframe(result)
-                            else:
-                                st.markdown(msg["result"])
-                        except:
+        if not st.session_state.messages:
+            st.session_state.messages = [
+                {"role": "assistant", "content": "Hi! Upload your dataset and ask me anything about it."}
+            ]
+
+        # ✅ Display chat history properly
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+                if msg["role"] == "assistant" and msg.get("code"):
+                    st.markdown("💻 **Generated Code:**")
+                    st.code(msg["code"], language="python")
+
+                if msg["role"] == "assistant" and msg.get("result"):
+                    st.markdown("📊 **Query Result:**")
+                    try:
+                        if isinstance(msg["result"], str) and msg["result"].startswith("{"):
+                            result = pd.read_json(msg["result"])
+                            st.dataframe(result)
+                        else:
                             st.markdown(msg["result"])
+                    except Exception as e:
+                        st.error(f"⚠️ Error displaying result: {e}")
 
-            # ✅ Chat input and processing
-            if user_query := st.chat_input("Ask a question about your dataset..."):
-                save_chat_message(st.session_state.user['_id'], "user", user_query)
-                st.session_state.messages.append({"role": "user", "content": user_query})
-                
-                with st.chat_message("user"):
-                    st.markdown(user_query)
+        # ✅ Handle user input
+        if user_query := st.chat_input("Ask a question about your dataset..."):
+            st.session_state.messages.append({"role": "user", "content": user_query})
 
-                with st.chat_message("assistant"):
-                    with st.spinner("🔎 Analyzing your query..."):
-                        code = generate_code_from_query(user_query, list(df.columns))
+            with st.chat_message("user"):
+                st.markdown(user_query)
 
-                        if code:
-                            result = execute_generated_code(code, df)
-                            
-                            st.markdown("💻 **Generated Code:**")
-                            st.code(code, language="python")
+            with st.chat_message("assistant"):
+                with st.spinner("🔎 Analyzing your query..."):
+                    code = generate_code_from_query(user_query, list(df.columns))
 
+                    if code:
+                        result_type, result = execute_generated_code(code, df)
+                        st.markdown("💻 **Generated Code:**")
+                        st.code(code, language="python")
+
+                        if result_type == "chart":
+                            st.markdown("📊 **Generated Visualization:**")
+                            st.pyplot(result)
+                        else:
                             st.markdown("📊 **Query Result:**")
                             if isinstance(result, pd.DataFrame):
                                 st.dataframe(result)
+                            else:
+                                st.markdown(result)
 
-                            save_chat_message(st.session_state.user['_id'], "assistant", "✅ Here are the results!", code, str(result))
-                        else:
-                            save_chat_message(st.session_state.user['_id'], "assistant", "⚠️ Failed to generate code.")
+                        # ✅ Save chat history (User + Assistant)
+                        save_chat_message(st.session_state.user["email"], "user", user_query)
+                        save_chat_message(
+                            st.session_state.user["email"], "assistant", "✅ Here are the results!", 
+                            code=code, 
+                            result=result.to_json() if isinstance(result, pd.DataFrame) else str(result)
+                        )
+
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": "✅ Here are the results!", "code": code, 
+                             "result": result.to_json() if isinstance(result, pd.DataFrame) else str(result)}
+                        )
+
+                    else:
+                        st.session_state.messages.append({"role": "assistant", "content": "⚠️ Failed to generate code."})
+
+        # ✅ Button to clear chat history
+        if st.sidebar.button("🗑️ Clear Chat History"):
+            clear_chat_history(st.session_state.user["email"])
+            st.session_state.messages = [{"role": "assistant", "content": "Chat history cleared! Start a new query."}]
+            st.rerun()
 
 else:
     st.info("☝️ Please login to continue.")
